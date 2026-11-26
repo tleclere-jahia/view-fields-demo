@@ -1,0 +1,10 @@
+{
+  "name": "vfdnt:viewFieldsDemo",
+  "priority": 1.0,
+  "fields": [
+    {"name": "cardSubtitle", "hide": true},
+    {"name": "cardImage", "hide": true},
+    {"name": "maxItems", "hide": true},
+    {"name": "listStyle", "hide": true}
+  ]
+}

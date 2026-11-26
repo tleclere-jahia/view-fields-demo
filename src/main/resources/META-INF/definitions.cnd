@@ -1,0 +1,11 @@
+<jnt = 'http://www.jahia.org/jahia/nt/1.0'>
+<jmix = 'http://www.jahia.org/jahia/mix/1.0'>
+<mix = 'http://www.jcp.org/jcr/mix/1.0'>
+<vfdnt = 'http://www.jahia.org/view-fields-demo/nt/1.0'>
+
+[vfdnt:viewFieldsDemo] > jnt:content, jmix:editorialContent, jmix:structuredContent, mix:title, jmix:renderable
+ - intro (string, textarea)
+ - cardSubtitle (string)
+ - cardImage (weakreference, picker[type='image']) < 'jmix:image'
+ - maxItems (long)
+ - listStyle (string, choicelist[resourceBundle]) = 'bullet' < 'bullet', 'numbered'
