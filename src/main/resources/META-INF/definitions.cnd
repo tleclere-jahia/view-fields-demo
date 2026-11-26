@@ -2,10 +2,27 @@
 <jmix = 'http://www.jahia.org/jahia/mix/1.0'>
 <mix = 'http://www.jcp.org/jcr/mix/1.0'>
 <vfdnt = 'http://www.jahia.org/view-fields-demo/nt/1.0'>
+<vfdmix = 'http://www.jahia.org/view-fields-demo/mix/1.0'>
 
-[vfdnt:viewFieldsDemo] > jnt:content, jmix:editorialContent, jmix:structuredContent, mix:title, jmix:renderable
+// A marker with no property. In a type that extends it, or a node that gets it, a property whose
+// selector sets the option views='<view>,<view>' shows only in those views of j:view, and loses its
+// value on save when the selected view hides it. A property with no views option always shows.
+// No j:view value means the view 'default'.
+[vfdmix:viewDependentFields] mixin
+
+[vfdnt:viewFieldsDemo] > jnt:content, jmix:editorialContent, jmix:structuredContent, mix:title, jmix:renderable, vfdmix:viewDependentFields
  - intro (string, textarea)
- - cardSubtitle (string)
- - cardImage (weakreference, picker[type='image']) < 'jmix:image'
- - maxItems (long)
- - listStyle (string, choicelist[resourceBundle]) = 'bullet' < 'bullet', 'numbered'
+ - cardSubtitle (string, text[views='card'])
+ - cardImage (weakreference, picker[type='image',views='card']) < 'jmix:image'
+ - maxItems (long, text[views='list'])
+ - listStyle (string, choicelist[resourceBundle,views='list']) = 'bullet' < 'bullet', 'numbered'
+
+[vfdnt:teaser] > jnt:content, jmix:editorialContent, jmix:structuredContent, mix:title, jmix:renderable, vfdmix:viewDependentFields
+ - teaserText (string, textarea)
+ - badge (string, text[views='card,list'])
+ - cardSubtitle (string, text[views='card'])
+ - maxItems (long, text[views='list'])
+
+// A control: the same views option, but no vfdmix:viewDependentFields, so nothing is hidden or cleared
+[vfdnt:control] > jnt:content, jmix:editorialContent, jmix:structuredContent, mix:title, jmix:renderable
+ - maxItems (long, text[views='list'])

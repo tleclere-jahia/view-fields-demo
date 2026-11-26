@@ -1,93 +1,104 @@
-import {test} from 'node:test';
+import {test, beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {hiddenProperties, onCreate, onEdit, onViewChange} from './viewFields.js';
+import {MIXIN, fieldViews, onCreate, onEditWith, onViewChange, resetState} from './viewFields.js';
 
-const T = 'vfdnt:viewFieldsDemo';
-const prop = (name, value) => ({name, value, definition: {declaringNodeType: {name: T}}});
+const DEMO = 'vfdnt:viewFieldsDemo';
+const TEASER = 'vfdnt:teaser';
+const CONTROL = 'vfdnt:control';
 
-test('the default view hides every managed property', () => {
-    assert.deepEqual(hiddenProperties(T, undefined), ['cardSubtitle', 'cardImage', 'maxItems', 'listStyle']);
-    assert.deepEqual(hiddenProperties(T, ''), ['cardSubtitle', 'cardImage', 'maxItems', 'listStyle']);
+// The properties of each type, as the CND declares them: name -> views option, or null
+const TYPES = {
+    [DEMO]: {intro: null, cardSubtitle: 'card', cardImage: 'card', maxItems: 'list', listStyle: 'list'},
+    [TEASER]: {teaserText: null, badge: 'card,list', cardSubtitle: 'card', maxItems: 'list'},
+    [CONTROL]: {maxItems: 'list'}
+};
+
+const field = (type, propertyName, views) => ({
+    name: `${type}_${propertyName}`, propertyName, nodeType: type, declaringNodeType: type, visible: true,
+    selectorOptions: views ? [{name: 'views', value: views}] : []
+});
+const formOf = type => [
+    {name: 'content', fieldSets: [{name: type, fields: Object.entries(TYPES[type]).map(([p, v]) => field(type, p, v))}]},
+    {name: 'layout', fieldSets: [{name: 'jmix:renderable', fields: [field('jmix:renderable', 'j:view', null)]}]}
+];
+const visibility = sections => Object.fromEntries(sections[0].fieldSets[0].fields.map(f => [f.propertyName, f.visible]));
+const nodeData = (type, properties, {mixin = type !== CONTROL, instanceMixin = false} = {}) => ({
+    primaryNodeType: {name: type, supertypes: [{name: 'jnt:content'}, ...(mixin ? [{name: MIXIN}] : [])]},
+    mixinTypes: instanceMixin ? [{name: MIXIN}] : [],
+    properties: properties.map(([name, value]) => ({name, value}))
+});
+const editCtx = (type, opts) => ({mode: 'edit', nodeData: nodeData(type, [], opts), sections: formOf(type), formik: {values: {}}, onSectionsUpdate: () => {}});
+
+beforeEach(() => resetState());
+
+test('the views option reads as a list', () => {
+    assert.deepEqual(fieldViews(field(TEASER, 'badge', 'card, list')), ['card', 'list']);
+    assert.equal(fieldViews(field(TEASER, 'teaserText', null)), null);
 });
 
-test('the card view hides the list properties only', () => {
-    assert.deepEqual(hiddenProperties(T, 'card'), ['maxItems', 'listStyle']);
-});
+for (const type of [DEMO, TEASER]) {
+    test(`the form of ${type} follows j:view from the CND options`, () => {
+        const ctx = editCtx(type);
+        onViewChange(undefined, 'x', {propertyName: 'ce:systemName'}, ctx);
+        const expected = Object.fromEntries(Object.entries(TYPES[type]).map(([p, v]) => [p, v === null]));
+        assert.deepEqual(visibility(ctx.sections), expected);
 
-test('another type is left alone', () => {
-    assert.deepEqual(hiddenProperties('jnt:text', 'card'), []);
-    const variables = {propertiesToSave: [{name: 'text', value: 'x'}], propertiesToDelete: []};
-    assert.equal(onEdit(variables, {primaryNodeType: {name: 'jnt:text'}}), variables);
-});
+        assert.equal(onViewChange(undefined, 'card', {propertyName: 'j:view'}, ctx), true);
+        const card = Object.fromEntries(Object.entries(TYPES[type]).map(([p, v]) => [p, v === null || v.split(',').includes('card')]));
+        assert.deepEqual(visibility(ctx.sections), card);
+    });
+}
 
-test('on edit, a switch to card drops the list values and deletes the stored ones', () => {
-    const nodeData = {
-        primaryNodeType: {name: T},
-        properties: [prop('j:view', 'list'), prop('maxItems', '5'), prop('listStyle', 'numbered'), prop('intro', 'hi')]
-    };
-    const variables = {
-        language: 'en',
-        propertiesToSave: [{name: 'j:view', value: 'card'}, {name: 'cardSubtitle', value: 'sub'}, {name: 'maxItems', value: '7'}],
-        propertiesToDelete: []
-    };
-    const result = onEdit(variables, nodeData);
+test('on edit of the teaser, a switch from list to card deletes maxItems and keeps the badge', () => {
+    const ctx = editCtx(TEASER);
+    onViewChange(undefined, 'list', {propertyName: 'j:view'}, ctx);
+    const data = nodeData(TEASER, [['j:view', 'list'], ['badge', 'b'], ['maxItems', '6'], ['teaserText', 't']]);
+    const variables = {language: 'en', propertiesToSave: [{name: 'j:view', value: 'card'}, {name: 'cardSubtitle', value: 's'}], propertiesToDelete: []};
+    const result = onEditWith(variables, data);
     assert.deepEqual(result.propertiesToSave.map(p => p.name), ['j:view', 'cardSubtitle']);
-    assert.deepEqual(result.propertiesToDelete, [{name: 'maxItems', language: 'en'}, {name: 'listStyle', language: 'en'}]);
+    assert.deepEqual(result.propertiesToDelete, [{name: 'maxItems', language: 'en'}]);
 });
 
-test('on edit with j:view unchanged, the stored view decides', () => {
-    const nodeData = {primaryNodeType: {name: T}, properties: [prop('j:view', 'card'), prop('cardSubtitle', 'sub')]};
-    const variables = {language: 'en', propertiesToSave: [{name: 'cardSubtitle', value: 'new'}, {name: 'maxItems', value: '3'}], propertiesToDelete: []};
-    const result = onEdit(variables, nodeData);
-    assert.deepEqual(result.propertiesToSave.map(p => p.name), ['cardSubtitle']);
-    assert.deepEqual(result.propertiesToDelete, []);
+test('a node that gets the mixin at instance level follows the rule', () => {
+    const ctx = editCtx(CONTROL, {mixin: false, instanceMixin: true});
+    onViewChange(undefined, 'x', {propertyName: 'ce:systemName'}, ctx);
+    assert.deepEqual(visibility(ctx.sections), {maxItems: false});
 });
 
-test('on edit, removing j:view goes back to default and deletes every stored managed value', () => {
-    const nodeData = {primaryNodeType: {name: T}, properties: [prop('j:view', 'card'), prop('cardSubtitle', 'sub')]};
-    const variables = {language: 'en', propertiesToSave: [], propertiesToDelete: [{name: 'j:view', language: 'en'}]};
-    const result = onEdit(variables, nodeData);
-    assert.deepEqual(result.propertiesToDelete, [{name: 'j:view', language: 'en'}, {name: 'cardSubtitle', language: 'en'}]);
+test('the control type, without the mixin, hides and clears nothing', () => {
+    const ctx = editCtx(CONTROL);
+    assert.equal(onViewChange(undefined, 'x', {propertyName: 'ce:systemName'}, ctx), false);
+    assert.deepEqual(visibility(ctx.sections), {maxItems: true});
+    const variables = {language: 'en', propertiesToSave: [{name: 'maxItems', value: '4'}], propertiesToDelete: []};
+    assert.equal(onEditWith(variables, nodeData(CONTROL, [['maxItems', '3']])), variables);
 });
 
-test('on create, the default listStyle is dropped unless the view is list', () => {
-    const base = {primaryNodeType: T, properties: [{name: 'jcr:title', value: 't'}, {name: 'listStyle', value: 'bullet'}]};
-    assert.deepEqual(onCreate(base, {}).properties.map(p => p.name), ['jcr:title']);
+test('on create, the server answers whether the type holds the mixin, then the save drops the hidden values', async () => {
+    const sections = formOf(DEMO);
+    const asked = [];
+    const fetchHasMixin = async type => {
+        asked.push(type);
+        return true;
+    };
+    const ctx = {mode: 'create', nodeTypeName: DEMO, sections, formik: {values: {}}, onSectionsUpdate: () => {}};
+    assert.equal(await onViewChange(undefined, 'bullet', {propertyName: 'listStyle'}, ctx, fetchHasMixin), true);
+    await onViewChange(undefined, 'x', {propertyName: 'ce:systemName'}, ctx, fetchHasMixin);
+    assert.deepEqual(asked, [DEMO]);
+    assert.equal(visibility(sections).listStyle, false);
+
+    const base = {primaryNodeType: DEMO, properties: [{name: 'jcr:title', value: 't'}, {name: 'listStyle', value: 'bullet'}]};
+    assert.deepEqual(onCreate(base).properties.map(p => p.name), ['jcr:title']);
     const list = {...base, properties: [...base.properties, {name: 'j:view', value: 'list'}]};
-    assert.deepEqual(onCreate(list, {}).properties.map(p => p.name), ['jcr:title', 'listStyle', 'j:view']);
+    assert.deepEqual(onCreate(list).properties.map(p => p.name), ['jcr:title', 'listStyle', 'j:view']);
 });
 
-test('a change of j:view only toggles visibility and keeps the values', () => {
-    const field = (propertyName, visible) => ({name: `${T}_${propertyName}`, propertyName, nodeType: T, visible});
-    const sections = [{name: 'content', fieldSets: [{name: T, fields: [field('intro', true), field('cardSubtitle', false), field('maxItems', false)]}]}];
-    let updates = 0;
-    const formik = {values: {[`${T}_maxItems`]: 4}};
-    const ctx = {mode: 'edit', nodeData: {primaryNodeType: {name: T}}, sections, formik, onSectionsUpdate: () => updates++};
-    assert.equal(onViewChange(undefined, 'card', {propertyName: 'j:view'}, ctx), true);
-    const byName = Object.fromEntries(sections[0].fieldSets[0].fields.map(f => [f.propertyName, f.visible]));
-    assert.deepEqual(byName, {intro: true, cardSubtitle: true, maxItems: false});
-    assert.equal(updates, 1);
-    assert.equal(formik.values[`${T}_maxItems`], 4);
-    assert.equal(onViewChange('card', 'card', {propertyName: 'j:view'}, ctx), false);
-});
-
-test('another field applies the view that Formik holds, so an empty j:view hides every managed field', () => {
-    const field = (propertyName, nodeType = T) => ({name: `${nodeType}_${propertyName}`, propertyName, nodeType, visible: true});
-    const sections = [
-        {name: 'content', fieldSets: [{name: T, fields: [field('intro'), field('cardSubtitle'), field('maxItems')]}]},
-        {name: 'layout', fieldSets: [{name: 'jmix:renderable', fields: [field('j:view', 'jmix:renderable')]}]}
-    ];
-    const ctx = {mode: 'create', nodeTypeName: T, sections, formik: {values: {}}, onSectionsUpdate: () => {}};
-    assert.equal(onViewChange(undefined, 'vfd-test', {propertyName: 'ce:systemName'}, ctx), true);
-    const visible = () => Object.fromEntries(sections[0].fieldSets[0].fields.map(f => [f.propertyName, f.visible]));
-    assert.deepEqual(visible(), {intro: true, cardSubtitle: false, maxItems: false});
-
-    ctx.formik.values['jmix:renderable_j:view'] = 'list';
-    assert.equal(onViewChange(undefined, 'x', {propertyName: 'jcr:title'}, ctx), true);
-    assert.deepEqual(visible(), {intro: true, cardSubtitle: false, maxItems: true});
+test('on create of the control type, the server says no and nothing is dropped', async () => {
+    const ctx = {mode: 'create', nodeTypeName: CONTROL, sections: formOf(CONTROL), formik: {values: {}}, onSectionsUpdate: () => {}};
+    assert.equal(await onViewChange(undefined, 'x', {propertyName: 'ce:systemName'}, ctx, async () => false), false);
+    const variables = {primaryNodeType: CONTROL, properties: [{name: 'maxItems', value: '2'}]};
+    assert.equal(onCreate(variables), variables);
 });
 
 test('the unmount of j:view changes nothing', () => {
-    const ctx = {mode: 'edit', nodeData: {primaryNodeType: {name: T}}, sections: [], onSectionsUpdate: () => {}};
-    assert.equal(onViewChange('card', undefined, {propertyName: 'j:view'}, ctx), false);
+    assert.equal(onViewChange('card', undefined, {propertyName: 'j:view'}, editCtx(DEMO)), false);
 });
