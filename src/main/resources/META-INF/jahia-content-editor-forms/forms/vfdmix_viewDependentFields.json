@@ -1,0 +1,11 @@
+{
+  "nodeType": "vfdmix:viewDependentFields",
+  "priority": 2.0,
+  "sections": [
+    {
+      "name": "layout",
+      "rank": 0.5,
+      "expanded": true
+    }
+  ]
+}

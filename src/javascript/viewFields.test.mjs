@@ -1,6 +1,6 @@
 import {test, beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {MIXIN, fieldViews, onCreate, onEditWith, onViewChange, resetState} from './viewFields.js';
+import {MIXIN, editorsInHash, fieldViews, formKeyOf, onCreate, onEditWith, onViewChange, reopenLayout, resetState} from './viewFields.js';
 
 const DEMO = 'vfdnt:viewFieldsDemo';
 const TEASER = 'vfdnt:teaser';
@@ -97,6 +97,23 @@ test('on create of the control type, the server says no and nothing is dropped',
     assert.equal(await onViewChange(undefined, 'x', {propertyName: 'ce:systemName'}, ctx, async () => false), false);
     const variables = {primaryNodeType: CONTROL, properties: [{name: 'maxItems', value: '2'}]};
     assert.equal(onCreate(variables), variables);
+});
+
+test('the URL hash ties each open editor to its formKey', () => {
+    const hash = "#(contentEditor:!((formKey:modal_0,isFullscreen:!t,lang:en,mode:edit,uilang:en,uuid:'1dd0bab2-f925'),(contentType:'vfdnt:teaser',formKey:modal_1,mode:create,uuid:bf58)))";
+    assert.deepEqual(editorsInHash(hash).map(e => [e.formKey, e.mode, e.uuid, e.contentType]), [
+        ['modal_0', 'edit', '1dd0bab2-f925', undefined],
+        ['modal_1', 'create', 'bf58', 'vfdnt:teaser']
+    ]);
+    assert.equal(formKeyOf({mode: 'edit', nodeData: {uuid: '1dd0bab2-f925'}}, hash), 'modal_0');
+    assert.equal(formKeyOf({mode: 'create', nodeTypeName: 'vfdnt:teaser'}, encodeURIComponent(hash)), 'modal_1');
+    assert.equal(formKeyOf({mode: 'edit', nodeData: {uuid: 'other'}}, hash), undefined);
+});
+
+test('a folded layout section of a form of the mixin opens again, and no other', () => {
+    const states = {modal_0: {content: true, layout: false}, modal_1: {layout: false}};
+    assert.deepEqual(reopenLayout(states, new Set(['modal_0'])), {type: 'CE_TOGGLE_SECTIONS', payload: {key: 'modal_0', sections: {content: true, layout: true}}});
+    assert.equal(reopenLayout({modal_0: {layout: true}, modal_1: {layout: false}}, new Set(['modal_0'])), null);
 });
 
 test('the unmount of j:view changes nothing', () => {

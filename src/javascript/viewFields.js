@@ -131,8 +131,13 @@ const formHasMixin = (ctx, nodeType, fetchHasMixin) => {
  * Returns true when it changed the form, or a promise of that while the create form waits for the server.
  */
 export const onViewChange = (previousValue, currentValue, field, ctx, fetchHasMixin = fetchTypeHasMixin) => {
-    if (!ctx?.sections || (field.propertyName === VIEW && currentValue === undefined)) {
+    if (!ctx?.sections) {
+        return false;
+    }
+
+    if (field.propertyName === VIEW && currentValue === undefined) {
         // undefined on j:view is the unmount of the field, not a choice
+        keepLayoutOpen(ctx, field, currentValue, false);
         return false;
     }
 
@@ -150,11 +155,12 @@ export const onViewChange = (previousValue, currentValue, field, ctx, fetchHasMi
 
     const view = currentView(currentValue, field, fields, ctx);
     const has = formHasMixin(ctx, nodeType, fetchHasMixin);
-    if (has && typeof has.then === 'function') {
-        return has.then(ok => (ok ? applyVisibility(ctx, view) : false));
-    }
+    const apply = ok => {
+        keepLayoutOpen(ctx, field, currentValue, ok);
+        return ok ? applyVisibility(ctx, view) : false;
+    };
 
-    return has ? applyVisibility(ctx, view) : false;
+    return has && typeof has.then === 'function' ? has.then(apply) : apply(Boolean(has));
 };
 
 const valueOf = property => (property ? (property.value ?? property.values) : undefined);
@@ -205,6 +211,89 @@ export const onCreate = variables => {
     const view = valueOf(properties.find(p => p.name === VIEW));
     const hidden = hiddenNames(state?.views || {}, view);
     return {...variables, properties: properties.filter(p => !hidden.includes(p.name))};
+};
+
+// The layout section, which holds j:view, stays open in a form of the mixin. The form override
+// vfdmix_viewDependentFields.json puts it first and opens it; a click would still fold it, so the
+// module opens it again. Content Editor keeps the open sections of each form in Redux under its
+// formKey, which only the URL hash ties to the node of the form.
+const LAYOUT = 'layout';
+const TOGGLE_ACTION = 'CE_TOGGLE_SECTIONS';
+const alwaysOpenForms = new Set();
+
+/**
+ * The editors that the URL hash lists, such as (contentEditor:!((formKey:modal_0,mode:edit,uuid:'…'))).
+ */
+export const editorsInHash = hash => {
+    const decoded = decodeURIComponent(hash || '');
+    const editors = [];
+    for (const match of decoded.matchAll(/\(([^()]*formKey:[^()]*)\)/g)) {
+        const entry = {};
+        for (const pair of match[1].match(/[A-Za-z]+:('[^']*'|[^,]*)/g) || []) {
+            const index = pair.indexOf(':');
+            entry[pair.slice(0, index)] = pair.slice(index + 1).replace(/^'|'$/g, '');
+        }
+
+        editors.push(entry);
+    }
+
+    return editors;
+};
+
+export const formKeyOf = (ctx, hash) => {
+    const editors = editorsInHash(hash);
+    const editor = ctx.mode === 'create' ?
+        editors.find(e => e.mode === 'create' && e.contentType === ctx.nodeTypeName) :
+        editors.find(e => e.mode !== 'create' && e.uuid === ctx.nodeData?.uuid);
+    return editor?.formKey;
+};
+
+/**
+ * The toggle action that opens the layout section again, or null when every form of the mixin keeps it open.
+ */
+export const reopenLayout = (toggleStates, formKeys) => {
+    for (const key of formKeys) {
+        const sections = toggleStates?.[key];
+        if (sections && sections[LAYOUT] === false) {
+            return {type: TOGGLE_ACTION, payload: {key, sections: {...sections, [LAYOUT]: true}}};
+        }
+    }
+
+    return null;
+};
+
+let unsubscribe = null;
+const watchLayout = () => {
+    const store = typeof window === 'undefined' ? null : window.jahia?.reduxStore;
+    if (unsubscribe || !store) {
+        return;
+    }
+
+    unsubscribe = store.subscribe(() => {
+        const action = reopenLayout(store.getState().contenteditor?.ceToggleSections, alwaysOpenForms);
+        if (action) {
+            store.dispatch(action);
+        }
+    });
+};
+
+const keepLayoutOpen = (ctx, field, currentValue, hasMixin) => {
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    const formKey = formKeyOf(ctx, window.location.hash);
+    if (!formKey) {
+        return;
+    }
+
+    if (field.propertyName === VIEW && currentValue === undefined) {
+        // The form closes, and its key will name another form
+        alwaysOpenForms.delete(formKey);
+    } else if (hasMixin) {
+        alwaysOpenForms.add(formKey);
+        watchLayout();
+    }
 };
 
 export const registerViewFields = registry => {
