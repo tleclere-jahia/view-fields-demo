@@ -70,3 +70,24 @@ test('a change of j:view only toggles visibility and keeps the values', () => {
     assert.equal(formik.values[`${T}_maxItems`], 4);
     assert.equal(onViewChange('card', 'card', {propertyName: 'j:view'}, ctx), false);
 });
+
+test('another field applies the view that Formik holds, so an empty j:view hides every managed field', () => {
+    const field = (propertyName, nodeType = T) => ({name: `${nodeType}_${propertyName}`, propertyName, nodeType, visible: true});
+    const sections = [
+        {name: 'content', fieldSets: [{name: T, fields: [field('intro'), field('cardSubtitle'), field('maxItems')]}]},
+        {name: 'layout', fieldSets: [{name: 'jmix:renderable', fields: [field('j:view', 'jmix:renderable')]}]}
+    ];
+    const ctx = {mode: 'create', nodeTypeName: T, sections, formik: {values: {}}, onSectionsUpdate: () => {}};
+    assert.equal(onViewChange(undefined, 'vfd-test', {propertyName: 'ce:systemName'}, ctx), true);
+    const visible = () => Object.fromEntries(sections[0].fieldSets[0].fields.map(f => [f.propertyName, f.visible]));
+    assert.deepEqual(visible(), {intro: true, cardSubtitle: false, maxItems: false});
+
+    ctx.formik.values['jmix:renderable_j:view'] = 'list';
+    assert.equal(onViewChange(undefined, 'x', {propertyName: 'jcr:title'}, ctx), true);
+    assert.deepEqual(visible(), {intro: true, cardSubtitle: false, maxItems: true});
+});
+
+test('the unmount of j:view changes nothing', () => {
+    const ctx = {mode: 'edit', nodeData: {primaryNodeType: {name: T}}, sections: [], onSectionsUpdate: () => {}};
+    assert.equal(onViewChange('card', undefined, {propertyName: 'j:view'}, ctx), false);
+});

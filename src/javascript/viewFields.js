@@ -22,12 +22,29 @@ const formNodeType = ctx => (ctx.mode === 'create' ? ctx.nodeTypeName : ctx.node
 
 const ownsField = (field, nodeType) => (field.declaringNodeType || field.nodeType) === nodeType;
 
+const allFields = sections => sections.flatMap(section => section.fieldSets.flatMap(fieldSet => fieldSet.fields));
+
 /**
- * selectorType.onChange: shows or hides the managed fields when j:view changes or the form loads.
- * The values stay in the form, so a contributor who switches back finds them again.
+ * The view the form holds: the new value when j:view itself changes, otherwise the value of the j:view field in Formik.
+ */
+const currentView = (currentValue, field, ctx) => {
+    if (field.propertyName === VIEW) {
+        return currentValue;
+    }
+
+    const viewField = allFields(ctx.sections).find(f => f.propertyName === VIEW);
+    return viewField ? ctx.formik?.values?.[viewField.name] : undefined;
+};
+
+/**
+ * selectorType.onChange on every field: shows or hides the managed fields to match j:view.
+ * The server drops a field hidden by a form override, so the fields arrive visible and the client hides them.
+ * j:view may hold no value and then never fires, so any field that mounts with a value, such as ce:systemName,
+ * applies the view too. The values stay in the form, so a contributor who switches back finds them again.
  */
 export const onViewChange = (previousValue, currentValue, field, ctx, rules = RULES) => {
-    if (field.propertyName !== VIEW || !ctx?.sections || currentValue === undefined) {
+    if (!ctx?.sections || (field.propertyName === VIEW && currentValue === undefined)) {
+        // undefined on j:view is the unmount of the field, not a choice
         return false;
     }
 
@@ -37,7 +54,7 @@ export const onViewChange = (previousValue, currentValue, field, ctx, rules = RU
         return false;
     }
 
-    const hidden = hiddenProperties(nodeType, currentValue, rules);
+    const hidden = hiddenProperties(nodeType, currentView(currentValue, field, ctx), rules);
     let changed = false;
     ctx.sections.forEach(section => section.fieldSets.forEach(fieldSet => fieldSet.fields.forEach(f => {
         if (ownsField(f, nodeType) && rule.managed.includes(f.propertyName)) {
